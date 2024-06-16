@@ -1,8 +1,195 @@
 import spacy
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline, Conversation, ConversationalPipeline
 import random
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+
+import spacy
+import os
+import re
+
+#################################################################
+##### ETAP 1 -> Przygotowanie artykułów i ich analiza ###########
+#################################################################
+
+#deklarowanie NLP - modelu do przetwarzania języka naturalnego
+#wykorzystano model pl_core_news_sm z bibliotaki spaCy
+nlp = spacy.load("pl_core_news_sm")
+
+#funkcja wczytująca zewnętrzne pliki (artykuły) do dalszej analizy
+def load_texts(directory):
+    texts = []
+    for filename in os.listdir(directory):
+        if filename.endswith(".txt"):
+            with open(os.path.join(directory, filename), 'r', encoding='utf-8') as file:
+                texts.append(file.read())
+    return texts
+
+#funkcja wykorzystująca NLP do wyciągnięcia z artykułów symptomów i oznak
+#wskazujących na depresję. Funkcja przetwarza artykuły uwzględniając
+#słowa kluczowe w zdaniach
+def extract_symptoms(texts, symptom_keywords):
+    symptoms = []
+    for text in texts:
+        doc = nlp(text)
+        for sent in doc.sents:
+            if any(keyword in sent.text.lower() for keyword in symptom_keywords):
+                symptoms.append(sent.text)
+    return symptoms
+
+#zdefiniowanie zmiennych jako lokalizacji artykułów oraz słów kluczowych do wyszukiwania symptomów / oznak
+directory = 'articles/'
+symptom_keywords = ['smutek', 'apatia', 'brak energii', 'utrata zainteresowań', 'problemy ze snem', 'zmiany apetytu', 'niskie poczucie własnej wartości', 'poczucie winy', 'problemy z koncentracją', 'myśli samobójcze', 'ból']
+
+#wywołanie funkcji wczytującej artykuły
+texts = load_texts(directory)
+
+#wywołanie funkcji wyciągającej potrzebne dane z artykułów
+symptoms = extract_symptoms(texts, symptom_keywords)
+
+#scalanie rezultatu
+result = ""
+for symptom in symptoms:
+    result = result + symptom
+
+
+
+#################################################################
+###### ETAP 2 -> Segregacja objawów i przygotowanie pytań #######
+#################################################################
+
+#funkcja klasyfikująca symptomy do odpowiednich kategorii na podstawie ich przesłania
+#dalej w kodzie będzie to wykorzystywane do nadania pytaniom odpowieniego kierunku, na przykład:
+#Czy obserwujesz u siebie objawy, Czy cierpisz na przypadłość...
+#funkcja sprawdzi każdą linię z rezultatów - jeśli kończy się znakiem :, linia uznawana jest za kategorię,
+#w przeciwnym przypadku, za symptom
+def segregate_symptoms(results):
+    categories = {}
+    current_category = None
+    for line in results.split('\n'):
+        if not line:
+            continue
+        if re.match(r'.+:$', line):
+            current_category = line
+            categories[current_category] = []
+        elif current_category:
+            categories[current_category].append(line)
+    return categories
+
+#wywołanie funkcji segregującej symptomy
+data = segregate_symptoms(result)
+
+#zdefiniowanie tablic dla odpowiendich kategorii pytań
+symptoms_diseases = []
+symptoms_symptoms = []
+symptoms_states = []
+symptoms_environment = []
+
+#metoda czyszcząca symptomy, zapobiegająca sytuacji wystąpienia w pytaniu podwójnego znaku na końcu zdania
+def clean_symptom(symptom):
+    if symptom[-1] in [';', ',', '.']:
+        return symptom[:-1]
+    return symptom
+
+#pętla przyporządkowująca symptomy do odpowiednich tablic na podstawie nazwy kategorii
+#i potencjalnie występujących w niej słów
+for category, symptoms in data.items():
+    if "nne choroby" in category:
+        for symptom in symptoms:
+            if symptom[-1] != '?':
+                symptoms_diseases.append(clean_symptom(symptom))
+    elif "towarzysz" in category or "wpływa" in category or "objaw" in category:
+        for symptom in symptoms:
+            if symptom[-1] != '?':
+                symptoms_symptoms.append(clean_symptom(symptom))
+    elif "stan" in category or "nastr" in category or "okres" in category:
+        for symptom in symptoms:
+            if symptom[-1] != '?':
+                symptoms_states.append(clean_symptom(symptom))
+    elif "otoczeni" in category:
+        for symptom in symptoms:
+            if symptom[-1] != '?':
+                symptoms_environment.append(clean_symptom(symptom))
+
+#zadeklarowanie pustej tablicy, która dalej w kodzie będzie zawierała pytania wykorzystywane przez chatBota
+questions = []
+
+#funkcja formująca odpowiednio pytanie na podstawie typu symptomu oraz określająca
+#potencjalne odpowiedzi uzytkownika wskazujące na rozpoznanie choroby
+def form_questions(symptoms, type):
+    if(type == "diseases"):
+        question_Form = "Czy cierpisz na przypadłość o nazwie "
+        answers = ["tak", "cierpię", "choruję"]
+    elif(type == "symptoms"):
+        question_Form = "Czy obserwujesz u siebie objawy: "
+        answers = ["tak", "obserwuję"]
+    elif (type == "states"):
+        question_Form = "Czy miewasz stan: "
+        answers = ["tak", "miewam", "często", "zdarza się", "czasami"]
+    elif (type == "environment"):
+        question_Form = "Czy obserwujesz u siebie zjawisko:  "
+        answers = ["tak", "obserwuję", "zdarza się", "czasami"]
+    for symptom in symptoms:
+        question = question_Form + symptom + '?'
+        final_question = (question, answers)
+        questions.append(final_question)
+
+#wywołanie funkcji formującej pytania dla każdej z tablic
+form_questions(symptoms_diseases, "diseases")
+form_questions(symptoms_symptoms, "symptoms")
+form_questions(symptoms_states, "states")
+form_questions(symptoms_environment, "environment")
+
+# for question_one in questions:
+#     print(question_one)
+
+#################################################################
+################ ETAP 3 -> Weryfikacja wyników ##################
+#################################################################
+
+#funkcja walidująca konkretne pytanie pod kątem jego długości i poprawności
+#wykorzystująca do tego NLP. Poprawność weryfikowana jest na podstawie konstrukcji zdania
+#w oparciu o występowanie rzeczownika
+def is_valid_question(question):
+    if len(question.split()) > 20:
+        return False
+    doc = nlp(question)
+    has_noun = any(token.pos_ == "NOUN" for token in doc)
+    return has_noun
+
+#funkcja wykorzystująca powyższy kod do wywołania walidacji na każdym z pytań
+#poprawne pytania dodawane są do tablicy, która następnie zastąpi obecne question
+def filter_questions(questions):
+    valid_questions = []
+    for question, answers in questions:
+        if is_valid_question(question) and (question, answers) not in valid_questions:
+            valid_questions.append((question, answers))
+    return valid_questions
+
+#wywołanie metody walidującej
+questions = filter_questions(questions)
+
+#wyświetlenie każdego z poprawnych pytań
+for question in questions:
+    print(question)
+
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
 
 # Load the spaCy NLP model for Polish
 try:
@@ -14,33 +201,20 @@ except OSError as e:
 
 # Load the sentiment analysis model (trinary)
 model_name = "cardiffnlp/twitter-roberta-base-sentiment"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name)
-sentiment_analyzer = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
+tokenizer_sentiment = AutoTokenizer.from_pretrained(model_name)
+model_sentiment = AutoModelForSequenceClassification.from_pretrained(model_name)
+sentiment_analyzer = pipeline("sentiment-analysis", model=model_sentiment, tokenizer=tokenizer_sentiment)
 
-# List of diagnostic questions and key words/phrases indicating possible depression symptoms
-questions = [
-    ("Jak często odczuwasz smutek?", ["często", "codziennie", "zawsze"]),
-    ("Czy masz uczucie pustki lub beznadziejności?", ["tak", "zawsze", "często"]),
-    ("Czy masz trudności z koncentracją?", ["tak", "często", "zawsze"]),
-    ("Czy odczuwasz zmęczenie lub brak energii?", ["tak", "często", "codziennie"]),
-    ("Czy masz trudności ze snem?", ["tak", "często", "zawsze"]),
-    ("Czy straciłeś zainteresowanie rzeczami, które kiedyś sprawiały Ci przyjemność?", ["tak", "wszystko", "nic"]),
-    ("Czy masz problemy z apetytem?", ["tak", "straciłem", "zawsze"]),
-    ("Czy masz myśli samobójcze?", ["tak", "często", "zawsze"]),
-    ("Czy czujesz się winny lub bezwartościowy?", ["tak", "często", "zawsze"]),
-    ("Czy odczuwasz niepokój lub lęk?", ["tak", "często", "zawsze"]),
-    ("Czy unikasz kontaktów z innymi ludźmi?", ["tak", "zawsze", "często"]),
-    ("Czy masz trudności z podejmowaniem decyzji?", ["tak", "często", "zawsze"]),
-    ("Czy masz poczucie, że życie nie ma sensu?", ["tak", "zawsze", "często"]),
-    ("Czy odczuwasz frustrację lub irytację?", ["tak", "często", "zawsze"]),
-    ("Czy masz poczucie bezradności?", ["tak", "zawsze", "często"]),
-    ("Czy masz trudności w pracy lub w szkole?", ["tak", "często", "zawsze"]),
-    ("Czy odczuwasz bóle ciała bez wyraźnej przyczyny?", ["tak", "często", "zawsze"]),
-    ("Czy masz trudności z utrzymaniem higieny osobistej?", ["tak", "często", "zawsze"]),
-    ("Czy odczuwasz obojętność wobec życia?", ["tak", "zawsze", "często"]),
-    ("Czy masz trudności z pamięcią?", ["tak", "często", "zawsze"])
-]
+# Load the text generation model
+model_name_causal = "eryk-mazus/polka-1.1b-chat"
+tokenizer_causal = AutoTokenizer.from_pretrained(model_name_causal, use_fast=True)
+tokenizer_causal.pad_token = tokenizer_causal.eos_token
+
+model_causal = AutoModelForCausalLM.from_pretrained(
+    model_name_causal,
+    torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+    device_map="auto"
+)
 
 # Conversation states
 QUESTION, ANSWER = range(2)
@@ -79,7 +253,8 @@ async def answer(update: Update, context: CallbackContext) -> int:
 
     if should_continue_topic(user_response, current_question):
         context.user_data['follow_up'] = True
-        await update.message.reply_text("Możesz powiedzieć mi więcej na ten temat?")
+        follow_up_question = await generate_follow_up(current_question, user_response)
+        await update.message.reply_text(follow_up_question)
     else:
         await ask_question(update, context)
     return ANSWER
@@ -99,6 +274,50 @@ def analyze_response(question, response):
 def should_continue_topic(user_response, current_question):
     is_negative = analyze_response(current_question, user_response)
     return is_negative
+
+def extract_follow_up(text):
+    question_pos = text.find('?')
+    if question_pos != -1:
+        return text[:question_pos + 1]
+    else:
+        return None
+
+async def generate_follow_up(question, user_response, max_attempts=5):
+    print(question)
+    print(user_response)
+    chat = [
+        {"role": "system",
+         "content": "Jesteś terapeutą diagnozującym depresję."},
+        {"role": "assistant", "content": question},
+        {"role": "user", "content": user_response}
+    ]
+    inputs = tokenizer_causal.apply_chat_template(chat, add_generation_prompt=True, return_tensors="pt")
+    first_param_device = next(model_causal.parameters()).device
+    inputs = inputs.to(first_param_device)
+
+    for attempt in range(max_attempts):
+        with torch.no_grad():
+            outputs = model_causal.generate(
+                inputs,
+                pad_token_id=tokenizer_causal.eos_token_id,
+                max_new_tokens=128,
+                temperature=0.2,
+                repetition_penalty=1.15,
+                top_p=0.95,
+                do_sample=True
+            )
+
+        new_tokens = outputs[0, inputs.size(1):]
+        response = tokenizer_causal.decode(new_tokens, skip_special_tokens=True)
+        follow_up_question = extract_follow_up(response)
+        if follow_up_question:
+            print(follow_up_question)
+            return follow_up_question
+
+    # Fallback if no valid follow-up question found after max_attempts
+    fallback_question = "Czy możesz powiedzieć mi więcej na ten temat?"
+    print(fallback_question)
+    return fallback_question
 
 def diagnose_depression(responses):
     total_score = sum(1 for _, _, is_negative in responses if is_negative)

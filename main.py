@@ -50,8 +50,16 @@ def extract_symptoms(texts, symptom_keywords):
 
 #zdefiniowanie zmiennych jako lokalizacji artykułów oraz słów kluczowych do wyszukiwania symptomów / oznak
 directory = 'articles/'
-symptom_keywords = ['smutek', 'apatia', 'brak energii', 'utrata zainteresowań', 'problemy ze snem', 'zmiany apetytu', 'niskie poczucie własnej wartości', 'poczucie winy', 'problemy z koncentracją', 'myśli samobójcze', 'ból']
-
+symptom_keywords = [
+    'smutek', 'apatia', 'brak energii', 'utrata zainteresowań', 'problemy ze snem', 
+    'zmiany apetytu', 'niskie poczucie własnej wartości', 'poczucie winy', 
+    'problemy z koncentracją', 'myśli samobójcze', 'ból', 'drażliwość', 'uczucie beznadziei',
+    'uczucie pustki', 'trudności z podejmowaniem decyzji', 'uczucie przytłoczenia', 
+    'zmniejszona wydajność', 'trudności z pamięcią', 'unikanie kontaktów społecznych', 
+    'negatywne myśli o przyszłości', 'nadmierne zamartwianie się', 'poczucie osamotnienia',
+    'utrata zainteresowania w codziennych czynnościach', 'płaczliwość', 'trudności w relacjach', 
+    'zmniejszona samoocena', 'problemy z motywacją', 'samookaleczanie się'
+]
 #wywołanie funkcji wczytującej artykuły
 texts = load_texts(directory)
 
@@ -210,11 +218,12 @@ model_name_causal = "eryk-mazus/polka-1.1b-chat"
 tokenizer_causal = AutoTokenizer.from_pretrained(model_name_causal, use_fast=True)
 tokenizer_causal.pad_token = tokenizer_causal.eos_token
 
+####################################################### CPU ######################################################
 model_causal = AutoModelForCausalLM.from_pretrained(
     model_name_causal,
-    torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
-    device_map="auto"
+    torch_dtype=torch.float32 
 )
+model_causal.to('cpu')
 
 # Conversation states
 QUESTION, ANSWER = range(2)
@@ -225,18 +234,28 @@ user_responses = []
 async def start(update: Update, context: CallbackContext) -> int:
     user_responses.clear()
     context.user_data['asked_questions'] = []
+    context.user_data['question_count'] = 0  # licznik pytań
     context.user_data['follow_up'] = False  # Flag to track follow-up status
     await update.message.reply_text('Witaj! Jestem chatbotem diagnostycznym. Odpowiedz na kilka pytań, aby pomóc nam ocenić Twój nastrój.')
     await ask_question(update, context)
     return ANSWER
 
+
 async def ask_question(update: Update, context: CallbackContext):
     context.user_data['follow_up'] = False  # Reset follow-up flag
+
+    # Sprawdź, czy zadano już 10 pytań
+    if context.user_data['question_count'] >= 10:
+        diagnosis = diagnose_depression(user_responses)
+        await update.message.reply_text(diagnosis)
+        return ConversationHandler.END
+
     available_questions = [q for q, _ in questions if q not in context.user_data['asked_questions']]
     if available_questions:
         question = random.choice(available_questions)
         context.user_data['current_question'] = question
         context.user_data['asked_questions'].append(question)
+        context.user_data['question_count'] += 1  # Zwiększ licznik pytań
         await update.message.reply_text(question)
     else:
         diagnosis = diagnose_depression(user_responses)
@@ -244,13 +263,20 @@ async def ask_question(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
 async def answer(update: Update, context: CallbackContext) -> int:
+    # Sprawdź, czy wiadomość zawiera zdjęcie
+    if update.message.photo:
+        await update.message.reply_text("Otrzymałem zdjęcie. Proszę odpowiedzieć na pytanie tekstowo.")
+        return ANSWER
+    
     user_response = update.message.text
     current_question = context.user_data.get('current_question')
-
+    
+    # Jeśli nie jest to wiadomość follow-up
     if not context.user_data['follow_up']:
         is_negative = analyze_response(current_question, user_response)
         user_responses.append((current_question, user_response, is_negative))
 
+    # Jeśli odpowiedź jest negatywna, kontynuuj temat
     if should_continue_topic(user_response, current_question):
         context.user_data['follow_up'] = True
         follow_up_question = await generate_follow_up(current_question, user_response)
@@ -259,6 +285,8 @@ async def answer(update: Update, context: CallbackContext) -> int:
         await ask_question(update, context)
     return ANSWER
 
+
+#Analizuje odpowiedź użytkownika, sprawdzając, czy jest negatywna
 def analyze_response(question, response):
     result = sentiment_analyzer(response)[0]
     label = result['label']
@@ -271,10 +299,13 @@ def analyze_response(question, response):
 
     return label == 'negative'  # Default to sentiment analysis if no keywords match
 
+#Sprawdza, czy należy kontynuować temat na podstawie analizy odpowiedzi użytkownika
 def should_continue_topic(user_response, current_question):
     is_negative = analyze_response(current_question, user_response)
     return is_negative
 
+
+#Ekstrahuje pytanie follow-up z wygenerowanego tekstu
 def extract_follow_up(text):
     question_pos = text.find('?')
     if question_pos != -1:
@@ -282,9 +313,8 @@ def extract_follow_up(text):
     else:
         return None
 
+#Generuje pytanie follow-up, jeśli odpowiedź użytkownika jest negatywna
 async def generate_follow_up(question, user_response, max_attempts=5):
-    print(question)
-    print(user_response)
     chat = [
         {"role": "system",
          "content": "Jesteś terapeutą diagnozującym depresję."},
@@ -292,8 +322,7 @@ async def generate_follow_up(question, user_response, max_attempts=5):
         {"role": "user", "content": user_response}
     ]
     inputs = tokenizer_causal.apply_chat_template(chat, add_generation_prompt=True, return_tensors="pt")
-    first_param_device = next(model_causal.parameters()).device
-    inputs = inputs.to(first_param_device)
+    inputs = inputs.to('cpu')
 
     for attempt in range(max_attempts):
         with torch.no_grad():
@@ -311,12 +340,10 @@ async def generate_follow_up(question, user_response, max_attempts=5):
         response = tokenizer_causal.decode(new_tokens, skip_special_tokens=True)
         follow_up_question = extract_follow_up(response)
         if follow_up_question:
-            print(follow_up_question)
             return follow_up_question
 
     # Fallback if no valid follow-up question found after max_attempts
     fallback_question = "Czy możesz powiedzieć mi więcej na ten temat?"
-    print(fallback_question)
     return fallback_question
 
 def diagnose_depression(responses):
@@ -331,16 +358,18 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text('Anulowano rozmowę diagnostyczną. Jeśli potrzebujesz pomocy, skontaktuj się z profesjonalistą.')
     return ConversationHandler.END
 
+
 def main() -> None:
     application = Application.builder().token("7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA").build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
+    entry_points=[CommandHandler('start', start)],
+    states={
+        ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer),
+                 MessageHandler(filters.PHOTO, answer)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
     application.add_handler(conv_handler)
 

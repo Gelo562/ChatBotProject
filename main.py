@@ -210,10 +210,21 @@ model_name_causal = "eryk-mazus/polka-1.1b-chat"
 tokenizer_causal = AutoTokenizer.from_pretrained(model_name_causal, use_fast=True)
 tokenizer_causal.pad_token = tokenizer_causal.eos_token
 
+# Check if CUDA is available
+cuda_available = torch.cuda.is_available()
+
+# Set torch_dtype based on CUDA availability
+if cuda_available and torch.cuda.is_bf16_supported():
+    torch_dtype = torch.bfloat16
+elif cuda_available:
+    torch_dtype = torch.float16
+else:
+    torch_dtype = torch.float32
+
 model_causal = AutoModelForCausalLM.from_pretrained(
     model_name_causal,
-    torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
-    device_map="auto"
+    torch_dtype=torch_dtype,
+    device_map="auto" if cuda_available else None
 )
 
 # Conversation states
@@ -287,7 +298,7 @@ async def generate_follow_up(question, user_response, max_attempts=5):
     print(user_response)
     chat = [
         {"role": "system",
-         "content": "Jesteś terapeutą diagnozującym depresję."},
+         "content": "Jesteś terapeutą diagnozującym depresję. Okaż zrozumienie dla użytkownika i dopytaj o jego problem w kulturalny i delikatny"},
         {"role": "assistant", "content": question},
         {"role": "user", "content": user_response}
     ]
@@ -332,7 +343,8 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 def main() -> None:
-    application = Application.builder().token("7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA").build()
+    application = Application.builder().token("7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I").build() #7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I
+    #7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],

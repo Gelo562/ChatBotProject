@@ -234,7 +234,6 @@ model_causal = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch_dtype,
     device_map="auto" if cuda_available else None
 )
-model_causal.to('cpu')
 
 # Conversation states
 QUESTION, ANSWER = range(2)
@@ -333,7 +332,6 @@ async def generate_follow_up(question, user_response, max_attempts=5):
         {"role": "user", "content": user_response}
     ]
     inputs = tokenizer_causal.apply_chat_template(chat, add_generation_prompt=True, return_tensors="pt")
-    inputs = inputs.to('cpu')
 
     for attempt in range(max_attempts):
         with torch.no_grad():

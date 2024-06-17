@@ -51,15 +51,17 @@ def extract_symptoms(texts, symptom_keywords):
 #zdefiniowanie zmiennych jako lokalizacji artykułów oraz słów kluczowych do wyszukiwania symptomów / oznak
 directory = 'articles/'
 symptom_keywords = [
-    'smutek', 'apatia', 'brak energii', 'utrata zainteresowań', 'problemy ze snem', 
-    'zmiany apetytu', 'niskie poczucie własnej wartości', 'poczucie winy', 
-    'problemy z koncentracją', 'myśli samobójcze', 'ból', 'drażliwość', 'uczucie beznadziei',
-    'uczucie pustki', 'trudności z podejmowaniem decyzji', 'uczucie przytłoczenia', 
-    'zmniejszona wydajność', 'trudności z pamięcią', 'unikanie kontaktów społecznych', 
+    'smutek', 'apatia', 'brak energii', 'utrata zainteresowań', 'problemy ze snem',
+    'zmiany apetytu', 'niskie poczucie własnej wartości', 'poczucie winy',
+    'problemy z koncentracją', 'myśli samobójcze', 'ból',
+    'uczucie pustki', 'trudności z podejmowaniem decyzji', 'uczucie przytłoczenia',
+    'zmniejszona wydajność', 'trudności z pamięcią', 'unikanie kontaktów społecznych',
     'negatywne myśli o przyszłości', 'nadmierne zamartwianie się', 'poczucie osamotnienia',
-    'utrata zainteresowania w codziennych czynnościach', 'płaczliwość', 'trudności w relacjach', 
+    'utrata zainteresowania w codziennych czynnościach', 'płaczliwość', 'trudności w relacjach',
     'zmniejszona samoocena', 'problemy z motywacją', 'samookaleczanie się'
 ]
+
+
 #wywołanie funkcji wczytującej artykuły
 texts = load_texts(directory)
 
@@ -119,7 +121,7 @@ for category, symptoms in data.items():
                 symptoms_diseases.append(clean_symptom(symptom))
     elif "towarzysz" in category or "wpływa" in category or "objaw" in category:
         for symptom in symptoms:
-            if symptom[-1] != '?':
+            if symptom[-1] != '?' and ' to ' not in symptom:
                 symptoms_symptoms.append(clean_symptom(symptom))
     elif "stan" in category or "nastr" in category or "okres" in category:
         for symptom in symptoms:

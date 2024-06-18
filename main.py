@@ -6,6 +6,7 @@ import random
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import warnings
+from deep_translator import GoogleTranslator
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 ################################################################################
@@ -201,6 +202,12 @@ for question in questions:
 ###############################################################################
 ###############################################################################
 
+#  Load the pipeline to zero-shot classification
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+
+# Function to translate text
+translator = GoogleTranslator(source='pl', target='en')
+
 # Load the spaCy NLP model for Polish
 try:
     nlp = spacy.load("pl_core_news_sm")
@@ -273,6 +280,11 @@ async def ask_question(update: Update, context: CallbackContext):
         diagnosis = diagnose_depression(user_responses)
         await update.message.reply_text(diagnosis)
         return ConversationHandler.END
+    
+# Function to translate text
+def translate_text(text):
+    translation = translator.translate(text)
+    return translation
 
 async def answer(update: Update, context: CallbackContext) -> int:
     # Sprawdź, czy wiadomość zawiera zdjęcie
@@ -300,16 +312,22 @@ async def answer(update: Update, context: CallbackContext) -> int:
 
 #Analizuje odpowiedź użytkownika, sprawdzając, czy jest negatywna
 def analyze_response(question, response):
-    result = sentiment_analyzer(response)[0]
-    label = result['label']
-
-    for q, keywords in questions:
-        if q == question:
-            for keyword in keywords:
-                if keyword in response.lower():
-                    return True  # Indicates a possible symptom of depression
-
-    return label == 'negative'  # Default to sentiment analysis if no keywords match
+    # Translating questions and answers to english 
+    question_en = translate_text(question)
+    response_en = translate_text(response)
+    print(question_en, response_en)
+    # Prepare sequention to classification
+    sequence = f"Question: {question_en}\nAnswer: {response_en}"
+    candidate_labels = ["affirmative", "negative"]
+    
+    # Classyfication response
+    result = classifier(sequence, candidate_labels)
+    
+    if result['labels'][0] == "affirmative":
+        print("tak")
+        return True
+    else:
+        return False
 
 #Sprawdza, czy należy kontynuować temat na podstawie analizy odpowiedzi użytkownika
 def should_continue_topic(user_response, current_question):
@@ -371,7 +389,8 @@ async def cancel(update: Update, context: CallbackContext) -> int:
 
 
 def main() -> None:
-    application = Application.builder().token("7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I").build() #7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I
+    application = Application.builder().token("7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA").build() 
+    #7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I
     #7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA
 
     conv_handler = ConversationHandler(

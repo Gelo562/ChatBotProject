@@ -1,6 +1,6 @@
 Install the necessary packages:
 
-    pip install python-telegram-bot spacy transformers sacremoses
+    pip install python-telegram-bot spacy transformers sacremoses sentencepiece deep-translator
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
     python -m spacy download pl_core_news_sm
 

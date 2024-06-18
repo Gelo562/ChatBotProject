@@ -315,7 +315,7 @@ def analyze_response(question, response):
     # Translating questions and answers to english 
     question_en = translate_text(question)
     response_en = translate_text(response)
-    print(question_en, response_en)
+    #print(question_en, response_en)    # do testow
     # Prepare sequention to classification
     sequence = f"Question: {question_en}\nAnswer: {response_en}"
     candidate_labels = ["affirmative", "negative"]
@@ -324,7 +324,7 @@ def analyze_response(question, response):
     result = classifier(sequence, candidate_labels)
     
     if result['labels'][0] == "affirmative":
-        print("tak")
+        #print("tak") # do testow
         return True
     else:
         return False
@@ -347,7 +347,7 @@ def extract_follow_up(text):
 async def generate_follow_up(question, user_response, max_attempts=5):
     chat = [
         {"role": "system",
-         "content": "Jesteś terapeutą diagnozującym depresję. Okaż zrozumienie dla użytkownika i dopytaj o jego problem w kulturalny i delikatny"},
+         "content": "Jesteś terapeutą diagnozującym depresję. Okaż zrozumienie dla użytkownika i dopytaj o jego problem w kulturalny i delikatny sposób"},
         {"role": "assistant", "content": question},
         {"role": "user", "content": user_response}
     ]

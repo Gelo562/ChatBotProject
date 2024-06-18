@@ -10,11 +10,6 @@ from deep_translator import GoogleTranslator
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 ################################################################################
-################################################################################
-################################################################################
-################################################################################
-################################################################################
-################################################################################
 
 import spacy
 import os
@@ -73,8 +68,6 @@ symptoms = extract_symptoms(texts, symptom_keywords)
 result = ""
 for symptom in symptoms:
     result = result + symptom
-
-
 
 #################################################################
 ###### ETAP 2 -> Segregacja objawów i przygotowanie pytań #######
@@ -196,11 +189,6 @@ for question in questions:
     print(question)
 
 ###############################################################################
-###############################################################################
-###############################################################################
-###############################################################################
-###############################################################################
-###############################################################################
 
 #  Load the pipeline to zero-shot classification
 classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
@@ -309,7 +297,6 @@ async def answer(update: Update, context: CallbackContext) -> int:
         await ask_question(update, context)
     return ANSWER
 
-
 #Analizuje odpowiedź użytkownika, sprawdzając, czy jest negatywna
 def analyze_response(question, response):
     # Translating questions and answers to english 
@@ -333,7 +320,6 @@ def analyze_response(question, response):
 def should_continue_topic(user_response, current_question):
     is_negative = analyze_response(current_question, user_response)
     return is_negative
-
 
 #Ekstrahuje pytanie follow-up z wygenerowanego tekstu
 def extract_follow_up(text):
@@ -387,9 +373,8 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text('Anulowano rozmowę diagnostyczną. Jeśli potrzebujesz pomocy, skontaktuj się z profesjonalistą.')
     return ConversationHandler.END
 
-
 def main() -> None:
-    application = Application.builder().token("7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA").build() 
+    application = Application.builder().token("7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I").build() 
     #7479723528:AAGTmj-KwKhdhTByObJZtqvVaO0_nL1QI6I
     #7360025234:AAHzov7nO1jtU0kJJtIV-IV370ocSjAqkyA
 

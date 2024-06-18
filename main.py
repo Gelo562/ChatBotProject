@@ -1,3 +1,4 @@
+#wersja stabilna
 import spacy
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
